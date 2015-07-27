@@ -139,14 +139,54 @@ let scalar_mult_row : float matrix -> int -> float -> unit =
 type rowop =  Add of float * int * int
            | Mult of float * int
            | Swap of int * int
-type trace = (float matrix * rowop list) list
+type reduction_trace = (float matrix * rowop list) list
+
+
+(* pretty printing a la http://mancoosi.org/~abate/ocaml-format-module *)
+let pp_matrix : float matrix -> unit =
+  let pp_header widths fmt header =
+    let first_row = Array.map (fun x -> Bytes.make (x + 1) ' ') widths in
+    Array.iteri (fun j cell ->
+        Format.pp_set_tab fmt ();
+        for z=0 to (Bytes.length header.(j)) - 1 do Bytes.set cell z header.(j).[z] done ;
+        Format.fprintf fmt "%s" cell
+      ) first_row
+  in
+  let pp_row pp_cell fmt row =
+    Format.pp_open_hbox fmt () ;
+    Array.iteri (fun j cell ->
+        Format.pp_print_tab fmt ();
+        Format.fprintf fmt "%a" pp_cell cell
+      ) row ;
+    Format.pp_close_box fmt ()
+  in
+  let pp_tables pp_row fmt (header, table) =
+    let widths = Array.make (Array.length table.(0)) 0 in
+    Array.iter (fun row ->
+        Array.iteri (fun j cell ->
+            widths.(j) <- max (String.length (string_of_float cell)) widths.(j)
+          ) row
+      ) table ;
+    Array.iteri (fun j cell ->
+        widths.(j) <- max (String.length cell) widths.(j)
+      ) header;
+    Format.pp_open_tbox fmt ();
+    Format.fprintf fmt "%a@\n" (pp_header widths) header;
+    Array.iter (pp_row fmt) table;
+    Format.pp_close_tbox fmt ()
+  in
+  let pp_float : Format.formatter -> float -> unit =
+    fun fmt f -> Format.fprintf fmt "%s" (string_of_float f)
+  in
+  fun mtx ->
+    let header = Array.init (Array.length (mtx.(0))) (fun i -> "") in
+    Format.fprintf Format.std_formatter "%a\n%!" (pp_tables (pp_row pp_float)) (header, mtx)
 
 (* imperative and aesthetically displeasing, but it works well *)
-let rec rref : float matrix -> trace =
+let rec rref : float matrix -> reduction_trace =
   fun mtx ->
     let mmax, nmax = dim mtx in
     let copy = copy_matrix mtx in
-    let trace = ref [] in
     let snap () = clean copy in
     let next_pivot () =
       let rec loop i j =
@@ -171,39 +211,35 @@ let rec rref : float matrix -> trace =
     in
     let eliminate =
       fun m n c ->
-        let ops = ref [] in
-        for_in_range (m+1) mmax
-          (fun m' ->
+        fold_in_range (m+1) mmax []
+          (fun acc m' ->
              let c' = get copy m' n in
              if c' =. 0.
-             then ()
+             then acc
              else
                let ratio = 0. -. c' in
-               ops := (Add (ratio, m, m'))::(!ops) ;
                for_in_range n nmax
-                 (fun n' -> set copy m' n' ((ratio *. (get copy m n')) +. (get copy m' n')))) ;
-        !ops
+                 (fun n' -> set copy m' n' ((ratio *. (get copy m n')) +. (get copy m' n'))) ;
+               (Add (ratio, m, m'))::acc)
     in
     let backsub =
       fun m ->
-        let ops = ref [] in
         let n =
           fold_in_range 0 nmax ~-1
             (fun a n -> match a with
                | -1 when not (get copy m n =. 0.) -> n
                | _ -> a)
         in
-        (if n = ~-1 then ()
+        (if n = ~-1 then []
          else
-           for_in_range 0 m
-             (fun m' ->
+           fold_in_range 0 m []
+             (fun acc m' ->
                 let ratio = 0. -. (get copy m' n) in
-                ops := (Add (ratio, m, m'))::(!ops) ;
                 for_in_range 0 nmax
-                  (fun n' -> set copy m' n' ((ratio *. (get copy m n')) +. (get copy m' n'))))) ;
-        !ops
+                  (fun n' -> set copy m' n' ((ratio *. (get copy m n')) +. (get copy m' n'))) ;
+                (Add (ratio, m, m'))::acc))
     in
-    let rec loop () =
+    let rec loop acc =
       match next_pivot () with
       | Some (m, n, c) ->
         let start = snap () in
@@ -215,18 +251,17 @@ let rec rref : float matrix -> trace =
                        (if not (c =. 1.) then [Mult (1. /. c, n)] else []) @
                        (if m <> n  then [Swap (m, n)] else []))
         in
-        trace := segment::(!trace) ;
-        loop ()
+        loop (segment::acc)
       | None ->
         let start = snap () in
         let ops =
           fold_in_range ~step:~-1 (mmax-1) ~-1 []
             (fun ops m -> (backsub m)@ops)
         in
-        trace := (start, ops)::(!trace)
+        (start, ops)::acc
     in
-    loop () ;
-    ((* oh *)snap (), [])::(!trace)
+    let trace = loop [] in
+    ((* oh *)snap (), [])::trace
 
 let random : int -> int -> float matrix =
   fun m n ->
@@ -262,10 +297,20 @@ let submatrix : 'a matrix -> int -> int -> int -> int -> 'a matrix =
   fun mtx m0 m n0 n ->
     init (m-m0) (n-n0) (fun i j -> get mtx (m0+i) (n0+j))
 
+let delsubmatrix : 'a matrix -> int -> int -> 'a matrix =
+  fun mtx i' j' ->
+    let m, n = dim mtx in
+    assert (m > 1) ;
+    init (m-1) (n-1)
+      (fun i j ->
+         let old_i = if i >= i' then i+1 else i
+         and old_j = if j >= j' then j+1 else j in
+         get mtx old_i old_j)
+
 let ident : int -> float matrix =
   fun dim -> init dim dim (fun i j -> if i = j then 1. else 0.)
 
-let invert : float matrix -> (float matrix * trace) option =
+let invert_by_reduction : float matrix -> bool * float matrix * reduction_trace =
   fun mtx ->
     let m, n = dim mtx in
     (if m <> n then failwith "Cannot invert a non-square matrix.") ;
@@ -273,7 +318,56 @@ let invert : float matrix -> (float matrix * trace) option =
     let ((reduced, _)::_) as tr = rref (augment mtx ident) in
     let maybe_ident = submatrix reduced 0 m 0 n in
     let maybe_inverse = submatrix reduced 0 m n (2*n) in
-    if equal_matrix (=) maybe_ident ident
-    then Some (maybe_inverse, tr)
-    else None
-      
+    (equal_matrix (=) maybe_ident ident, maybe_inverse, tr)
+
+let rec determinant : float matrix -> float =
+  let num_zeros =
+    fold_row
+      (fun nz f -> if f = 0. then nz+1 else nz)
+      0
+  in
+  fun mtx ->
+    let m, n = dim mtx in
+    assert (m = n) ;
+    match m with
+    | 1 -> get mtx 0 0
+    | 2 -> (get mtx 0 0) *. (get mtx 1 1) -. (get mtx 0 1) *. (get mtx 1 0)
+    | n ->
+      (* Computing the determinant of an nxn matrix. 
+         * Choose the row r with the greatest number of 0s.
+         * Compute the determinant of the given matrix by cofactor
+         * expansion across r.
+      *)
+      let r =
+        fold_in_range 1 m 0
+          (fun msf m ->
+             if num_zeros mtx m > num_zeros mtx msf
+             then m
+             else msf)
+      in
+      let det, _ =
+        fold_row
+          (fun (acc, j) aij -> match abs_float aij with
+               | 0.  -> (acc, j+1)
+               | aij -> (acc +. aij *. (cofactor mtx r j), j+1))
+          (0., 0)
+          mtx
+          r
+      in
+      det
+
+and cofactor : float matrix -> int -> int -> float =
+  fun mtx i j ->
+    (~-.1. ** (float_of_int (i+j))) *. (determinant (delsubmatrix mtx i j))
+
+let adjugate : float matrix -> float matrix =
+  fun mtx ->
+    let m, n = dim mtx in
+    clean (init m n (fun i j -> cofactor mtx j i))
+
+let invert_by_cramer : float matrix -> float matrix =
+  fun mtx ->
+    let m, n = dim mtx in
+    let det = determinant mtx in
+    clean (init m n (fun i j -> cofactor mtx j i /. det))
+    
