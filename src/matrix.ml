@@ -18,6 +18,7 @@ let rec fold_in_range ?(step=1) x y a f =
   else fold_in_range ~step (x + step) y (f a x) f
 
 type 'a matrix = 'a array array
+[@@deriving eq, ord, show]
 
 let make : int -> int -> 'a -> 'a matrix =
   fun m n ->
@@ -200,6 +201,7 @@ let rec rref : float matrix -> reduction_trace =
             (fun a m ->
                let coef = get copy m j in
                match a with
+               | None when m > i && coef =. 1.            -> Some (m, coef)
                | None when not (coef =. 0. || coef =. 1.) -> Some (m, coef)
                | Some (m', coef') when coef > coef'       -> Some (m, coef)
                | _ -> a)
@@ -237,7 +239,9 @@ let rec rref : float matrix -> reduction_trace =
                 let ratio = 0. -. (get copy m' n) in
                 for_in_range 0 nmax
                   (fun n' -> set copy m' n' ((ratio *. (get copy m n')) +. (get copy m' n'))) ;
-                (Add (ratio, m, m'))::acc))
+                if ratio =. 0.
+                then acc
+                else (Add (ratio, m, m'))::acc))
     in
     let rec loop acc =
       match next_pivot () with
@@ -261,6 +265,7 @@ let rec rref : float matrix -> reduction_trace =
         (start, ops)::acc
     in
     let trace = loop [] in
+    print_endline "done" ;
     ((* oh *)snap (), [])::trace
 
 let random : int -> int -> float matrix =
@@ -333,11 +338,6 @@ let rec determinant : float matrix -> float =
     | 1 -> get mtx 0 0
     | 2 -> (get mtx 0 0) *. (get mtx 1 1) -. (get mtx 0 1) *. (get mtx 1 0)
     | n ->
-      (* Computing the determinant of an nxn matrix. 
-         * Choose the row r with the greatest number of 0s.
-         * Compute the determinant of the given matrix by cofactor
-         * expansion across r.
-      *)
       let r =
         fold_in_range 1 m 0
           (fun msf m ->

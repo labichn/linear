@@ -131,7 +131,7 @@ let _ =
 
   if !row_reduce
   then begin
-    let      mtx = read_mtx () in
+    let mtx = read_mtx () in
     let ((out, _)::_) as tr = rref mtx in
     match !tex_mtx with
     |  "" -> pp_matrix out
