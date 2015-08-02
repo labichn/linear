@@ -183,8 +183,7 @@ let pp_matrix : float matrix -> unit =
     let header = Array.init (Array.length (mtx.(0))) (fun i -> "") in
     Format.fprintf Format.std_formatter "%a\n%!" (pp_tables (pp_row pp_float)) (header, mtx)
 
-(* imperative and aesthetically displeasing, but it works well *)
-let rec rref : float matrix -> reduction_trace =
+let rec rr : float matrix -> reduction_trace =
   fun mtx ->
     let mmax, nmax = dim mtx in
     let copy = copy_matrix mtx in
@@ -224,25 +223,6 @@ let rec rref : float matrix -> reduction_trace =
                  (fun n' -> set copy m' n' ((ratio *. (get copy m n')) +. (get copy m' n'))) ;
                (Add (ratio, m, m'))::acc)
     in
-    let backsub =
-      fun m ->
-        let n =
-          fold_in_range 0 nmax ~-1
-            (fun a n -> match a with
-               | -1 when not (get copy m n =. 0.) -> n
-               | _ -> a)
-        in
-        (if n = ~-1 then []
-         else
-           fold_in_range 0 m []
-             (fun acc m' ->
-                let ratio = 0. -. (get copy m' n) in
-                for_in_range 0 nmax
-                  (fun n' -> set copy m' n' ((ratio *. (get copy m n')) +. (get copy m' n'))) ;
-                if ratio =. 0.
-                then acc
-                else (Add (ratio, m, m'))::acc))
-    in
     let rec loop acc =
       match next_pivot () with
       | Some (m, n, c) ->
@@ -256,17 +236,44 @@ let rec rref : float matrix -> reduction_trace =
                        (if m <> n  then [Swap (m, n)] else []))
         in
         loop (segment::acc)
-      | None ->
-        let start = snap () in
-        let ops =
-          fold_in_range ~step:~-1 (mmax-1) ~-1 []
-            (fun ops m -> (backsub m)@ops)
-        in
-        (start, ops)::acc
+      | None -> acc
     in
     let trace = loop [] in
-    print_endline "done" ;
-    ((* oh *)snap (), [])::trace
+    (snap (), [])::trace
+
+let rec rref : float matrix -> reduction_trace =
+  let backsub =
+    fun mtx m ->
+      let mmax, nmax = dim mtx in
+      let n =
+        fold_in_range 0 nmax ~-1
+          (fun a n -> match a with
+             | -1 when not (get mtx m n =. 0.) -> n
+             | _ -> a)
+      in
+      (if n = ~-1
+       then []
+       else
+         fold_in_range 0 m []
+           (fun acc m' ->
+              let ratio = 0. -. (get mtx m' n) in
+              for_in_range 0 nmax
+                (fun n' ->
+                   set mtx m' n'
+                     ((ratio *. (get mtx m n')) +. (get mtx m' n'))) ;
+              if ratio =. 0.
+              then acc
+              else (Add (ratio, m, m'))::acc))
+  in
+  fun mtx ->
+    let mmax, nmax = dim mtx in
+    let (rr, [])::tr = rr mtx in
+    let out = clean rr in
+    let ops =
+      fold_in_range ~step:~-1 (mmax-1) ~-1 []
+        (fun ops m -> (backsub out m)@ops)
+    in
+    (out, [])::(rr, ops)::tr
 
 let random : int -> int -> float matrix =
   fun m n ->

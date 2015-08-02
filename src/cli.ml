@@ -85,12 +85,15 @@ let read_mtx : unit -> float matrix =
   in
   fun () ->
     try
-      let lolos = List.map (split " ") (split "\n" (loop "")) in
-      let lolof = List.map (List.map float_of_string) lolos in
-      let n0 = List.length (List.hd lolof) in
-      (if List.exists (fun l -> List.length l <> n0) lolof then
+      let llf : float list list =
+        List.map
+          (fun l -> List.map float_of_string (split " " l))
+          (split "\n" (loop ""))
+      in
+      let n0 = List.length (List.hd llf) in
+      (if List.exists (fun l -> List.length l <> n0) llf then
          failwith "Given matrix has inconsistent row lengths.") ;
-      Array.of_list (List.map Array.of_list lolof)
+      Array.of_list (List.map Array.of_list llf)
     with _ -> print_endline "Bad input for matrix." ; exit 2
 
 let _ =  
@@ -103,6 +106,7 @@ let _ =
 
   let tex_mtx    = ref "" in
   let row_reduce = ref false in
+  let row_reduce_echelon = ref false in
   let multiply   = ref false in
   let inv        = ref false in
   let inv_cramer = ref false in
@@ -113,8 +117,10 @@ let _ =
     (Arg.align
        [ ("-tex-out",     Arg.Set_string tex_mtx,
           "{g, b} -- outputs latex rather than pretty printing")
-       ; ("-row-reduce",  Arg.Set row_reduce,
+       ; ("-rr",          Arg.Set row_reduce,
           "       -- performs row reduction on the given matrix")
+       ; ("-rref",        Arg.Set row_reduce_echelon,
+          "       -- performs full row reduction on the given matrix")
        ; ("-multiply",    Arg.Set multiply,
           "       -- multiplies the two given matrices")
        ; ("-adjugate",    Arg.Set adj,
@@ -130,6 +136,15 @@ let _ =
     usage ;
 
   if !row_reduce
+  then begin
+    let mtx = read_mtx () in
+    let ((out, _)::_) as tr = rr mtx in
+    match !tex_mtx with
+    |  "" -> pp_matrix out
+    | "g" -> print_endline (tex_reduction_trace tr)
+    | "b" -> print_endline (tex_matrix "b" out)
+  end
+  else if !row_reduce_echelon
   then begin
     let mtx = read_mtx () in
     let ((out, _)::_) as tr = rref mtx in
