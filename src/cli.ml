@@ -1,4 +1,7 @@
 open Matrix
+open Ops
+open Study
+open Util
 
 let mtx_begin typ =
   if typ = "g"
@@ -8,22 +11,6 @@ let mtx_end   typ =
   if typ = "g"
   then "\\end{gmatrix}"
   else "\\end{bmatrix}"
-
-let string_of_list ?(sep=", ") ?(border=(fun s -> "[" ^ s ^ "]")) soe l =
-  if List.length l > 0 then
-    let elts = List.fold_right (fun elt a -> (soe elt)^sep^a) l "" in
-    border (String.sub elts 0 ((String.length elts)-(String.length sep)))
-  else border ""
-
-
-let trunc f =
-  let digits_after_dot = 3 in
-  let  sf = string_of_float f in
-  let len = String.length sf in
-  let ind = String.rindex sf '.' in
-  if ind = len-1
-  then String.sub sf 0 (len-1)
-  else String.sub sf 0 (min (ind + digits_after_dot + 1) len)
 
 let tex_matrix_data : float matrix -> string =
   fun mtx ->
@@ -64,7 +51,7 @@ let tex_reduction_trace : reduction_trace -> string =
     | [] -> a
   in
   fun trace ->
-    string_of_list
+   string_of_list
       ~sep:"\n\\sim\n"
       ~border:(fun s -> "\\(" ^ s ^ "\\)")
       tex_elt
@@ -96,6 +83,26 @@ let read_mtx : unit -> float matrix =
       Array.of_list (List.map Array.of_list llf)
     with _ -> print_endline "Bad input for matrix." ; exit 2
 
+let study_matrix mtx =
+  let in_ref = in_ref mtx in
+  let   rank = rank mtx in
+  let   cols = col_space mtx in
+  let   null = null_space mtx in
+  Printf.printf
+    ("It is%s in row-echelon form.\n" ^^
+     "Rank:         %i\n" ^^
+     "Column Space: %s\n" ^^
+     "Null Space:   %s\n" ^^
+     "%!")
+    (if in_ref then "" else " not")
+    rank
+    (string_of_list ~sep:"," ~border:(fun s->"{"^s^"}")
+       (string_of_list ~sep:" " ~border:(fun s->"("^s^")") string_of_float)
+       cols)
+    (string_of_list ~sep:"," ~border:(fun s->"{"^s^"}")
+       (string_of_list ~sep:" " ~border:(fun s->"("^s^")") string_of_float)
+       null)
+
 let _ =  
   let cmd_name = Sys.argv.(0) in
   let usage =
@@ -112,6 +119,7 @@ let _ =
   let inv_cramer = ref false in
   let adj        = ref false in
   let det        = ref false in
+  let study      = ref false in
 
   Arg.parse
     (Arg.align
@@ -131,6 +139,8 @@ let _ =
           "       -- inverts the given matrix by Cramer's rule")
        ; ("-det",         Arg.Set det,
           "       -- computes the determinant of a matrix")
+       ; ("-study",       Arg.Set study,
+          "       -- get a bunch of info about the given matrix")
        ])
     (fun anon_arg -> failwith ("Unexpected anonymous argument: " ^ anon_arg))
     usage ;
@@ -215,6 +225,8 @@ let _ =
      | "" -> pp_matrix adj
      | ty -> print_endline (tex_matrix ty adj))
   end
+  else if !study
+  then study_matrix (read_mtx ())
   else if !tex_mtx <> ""
   then print_endline (tex_matrix !tex_mtx (read_mtx ()))
 
