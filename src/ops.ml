@@ -101,6 +101,12 @@ let random : int -> int -> float matrix =
     Random.self_init () ;
     init m n (fun _ _ -> float_of_int (Random.int 10))
 
+let dot_prod : float matrix -> float matrix -> float =
+  fun mtxL mtxR ->
+    let mML, nML = dim mtxL
+    and mMR, nMR = dim mtxR in
+    (if nML <> mMR then failwith "Cannot multiple given matrices--bad dimensions!") ;
+
 let mult : float matrix -> float matrix -> float matrix =
   fun mtxL mtxR ->
     let mML, nML = dim mtxL
